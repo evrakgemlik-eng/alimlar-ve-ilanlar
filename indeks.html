@@ -1,0 +1,38 @@
+name: Kamu İlan Takip Botu
+
+on:
+  schedule:
+    # Her gün TSİ 09:00 ve 18:00'de otomatik çalışır (UTC saatine göre ayarlanmıştır)
+    - cron: '0 6,15 * * *'
+  workflow_dispatch: # İstenildiği zaman GitHub üzerinden manuel çalıştırma butonu ekler
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Klonla
+        uses: actions/checkout@v4
+
+      - name: Python Kurulumu
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Bağımlılıkları Yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 python-dotenv
+
+      - name: Botu Çalıştır
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Veritabanını GitHub'a Kaydet (Gözden Kaçan İlan Olmaması İçin)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add ilanlar.db
+          git commit -m "auto: Veritabanı güncellendi" || exit 0
+          git push
