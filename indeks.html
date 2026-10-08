@@ -1,907 +1,205 @@
-# ============================================================
-# KAMU İLAN TAKİP BOTU - V1
-# GitHub / Streamlit için tek dosyalık prototip
-# ============================================================
-
-import streamlit as st
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-from datetime import datetime
-import re
-import hashlib
-import time
-
-# ============================================================
-# AYARLAR
-# ============================================================
-
-st.set_page_config(
-    page_title="Kamu İlan Takip Botu",
-    page_icon="🔎",
-    layout="wide"
-)
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/130.0 Safari/537.36"
-    )
-}
-
-# Resmî kaynaklar
-SOURCES = {
-    "Kariyer Kapısı": "https://kariyerkapisi.gov.tr/",
-    "İŞKUR": "https://www.iskur.gov.tr/",
-    "Resmî Gazete": "https://www.resmigazete.gov.tr/"
-}
-
-# ============================================================
-# KULLANICI PROFİLİ
-# ============================================================
-
-DEFAULT_PROFILE = {
-    "department": "Siyaset Bilimi ve Kamu Yönetimi",
-    "degree": "Lisans",
-    "kpss_p3": 82,
-    "cities": [
-        "Ankara",
-        "Konya"
-    ],
-    "positions": [
-        "Memur",
-        "Büro Personeli",
-        "VHKİ",
-        "Bilgisayar İşletmeni"
-    ],
-    "certificates": [
-        "Bilgisayar",
-        "Bilgisayarlı Muhasebe"
-    ],
-    "high_school": "Bilgisayar Programcılığı"
-}
-
-# ============================================================
-# SBKY / İİBF EŞDEĞERLİKLERİ
-# ============================================================
-
-DEPARTMENT_KEYWORDS = [
-    "siyaset bilimi ve kamu yönetimi",
-    "kamu yönetimi",
-    "siyasal bilgiler",
-    "siyasal bilgiler fakültesi",
-    "iibf",
-    "iktisadi ve idari bilimler fakültesi",
-    "iktisat",
-    "işletme",
-    "maliye",
-    "uluslararası ilişkiler"
-]
-
-# ============================================================
-# HTTP İŞLEMLERİ
-# ============================================================
-
-def get_page(url):
-    try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=20
-        )
-
-        response.raise_for_status()
-
-        response.encoding = response.apparent_encoding
-
-        return response.text
-
-    except Exception as e:
-        st.warning(f"Kaynak alınamadı: {url} | {e}")
-        return None
-
-
-# ============================================================
-# METİN TEMİZLEME
-# ============================================================
-
-def clean_text(text):
-    if not text:
-        return ""
-
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
-
-
-# ============================================================
-# İLAN HASH
-# ============================================================
-
-def create_hash(text):
-    return hashlib.sha256(
-        text.encode("utf-8")
-    ).hexdigest()
-
-
-# ============================================================
-# KPSS PUANI BUL
-# ============================================================
-
-def extract_kpss(text):
-
-    text_lower = text.lower()
-
-    patterns = [
-        r"kpss.*?(\d{2})",
-        r"en az\s+(\d{2}).*?kpss",
-        r"kpss.*?puan.*?(\d{2})",
-        r"(\d{2})\s*puan.*?kpss"
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text_lower,
-            re.IGNORECASE
-        )
-
-        if match:
-
-            try:
-                score = int(match.group(1))
-
-                if 50 <= score <= 100:
-                    return score
-
-            except:
-                pass
-
-    return None
-
-
-# ============================================================
-# ŞEHİR BUL
-# ============================================================
-
-def detect_city(text):
-
-    cities = [
-        "Adana",
-        "Adıyaman",
-        "Afyonkarahisar",
-        "Ağrı",
-        "Aksaray",
-        "Amasya",
-        "Ankara",
-        "Antalya",
-        "Ardahan",
-        "Artvin",
-        "Aydın",
-        "Balıkesir",
-        "Bartın",
-        "Batman",
-        "Bayburt",
-        "Bilecik",
-        "Bingöl",
-        "Bitlis",
-        "Bolu",
-        "Burdur",
-        "Bursa",
-        "Çanakkale",
-        "Çankırı",
-        "Çorum",
-        "Denizli",
-        "Diyarbakır",
-        "Düzce",
-        "Edirne",
-        "Elazığ",
-        "Erzincan",
-        "Erzurum",
-        "Eskişehir",
-        "Gaziantep",
-        "Giresun",
-        "Gümüşhane",
-        "Hakkari",
-        "Hatay",
-        "Iğdır",
-        "Isparta",
-        "İstanbul",
-        "İzmir",
-        "Kahramanmaraş",
-        "Karabük",
-        "Karaman",
-        "Kars",
-        "Kastamonu",
-        "Kayseri",
-        "Kırıkkale",
-        "Kırklareli",
-        "Kırşehir",
-        "Kilis",
-        "Kocaeli",
-        "Konya",
-        "Kütahya",
-        "Malatya",
-        "Manisa",
-        "Mardin",
-        "Mersin",
-        "Muğla",
-        "Muş",
-        "Nevşehir",
-        "Niğde",
-        "Ordu",
-        "Osmaniye",
-        "Rize",
-        "Sakarya",
-        "Samsun",
-        "Siirt",
-        "Sinop",
-        "Sivas",
-        "Şanlıurfa",
-        "Şırnak",
-        "Tekirdağ",
-        "Tokat",
-        "Trabzon",
-        "Tunceli",
-        "Uşak",
-        "Van",
-        "Yalova",
-        "Yozgat",
-        "Zonguldak"
-    ]
-
-    for city in cities:
-
-        if city.lower() in text.lower():
-            return city
-
-    return "Belirtilmemiş"
-
-
-# ============================================================
-# POZİSYON BUL
-# ============================================================
-
-def detect_position(text):
-
-    positions = [
-        "memur",
-        "büro personeli",
-        "büro görevlisi",
-        "VHKİ",
-        "bilgisayar işletmeni",
-        "destek personeli",
-        "idari personel",
-        "personel",
-        "uzman yardımcısı",
-        "uzman",
-        "mühendis",
-        "tekniker",
-        "teknisyen"
-    ]
-
-    text_lower = text.lower()
-
-    for position in positions:
-
-        if position.lower() in text_lower:
-            return position
-
-    return "Belirtilmemiş"
-
-
-# ============================================================
-# MEZUNİYET UYGUNLUĞU
-# ============================================================
-
-def check_education(text):
-
-    text_lower = text.lower()
-
-    # doğrudan SBKY / Kamu Yönetimi
-    if (
-        "siyaset bilimi ve kamu yönetimi" in text_lower
-        or "kamu yönetimi" in text_lower
-    ):
-        return True, "SBKY/Kamu Yönetimi kabul ediliyor."
-
-    # İİBF / Siyasal Bilgiler
-    if (
-        "iibf" in text_lower
-        or "iktisadi ve idari bilimler" in text_lower
-        or "siyasal bilgiler fakültesi" in text_lower
-    ):
-        return True, "İİBF/Siyasal Bilgiler kapsamı bulundu."
-
-    # Genel lisans
-    if (
-        "herhangi bir lisans" in text_lower
-        or "lisans mezunu olmak" in text_lower
-        or "lisans mezunlarından" in text_lower
-    ):
-        return True, "Genel lisans şartı bulunuyor."
-
-    return False, "SBKY için açık bir mezuniyet eşleşmesi bulunamadı."
-
-
-# ============================================================
-# SERTİFİKA KONTROLÜ
-# ============================================================
-
-def check_certificate(text, certificates):
-
-    text_lower = text.lower()
-
-    found = []
-
-    for certificate in certificates:
-
-        if certificate.lower() in text_lower:
-
-            found.append(certificate)
-
-    return found
-
-
-# ============================================================
-# UYGUNLUK ANALİZİ
-# ============================================================
-
-def analyze_job(job, profile):
-
-    score = 0
-
-    reasons = []
-
-    text = job["text"]
-
-    # --------------------------------------------------------
-    # MEZUNİYET
-    # --------------------------------------------------------
-
-    education_ok, education_reason = check_education(text)
-
-    if education_ok:
-
-        score += 30
-        reasons.append("✅ Mezuniyet şartı uygun.")
-
-    else:
-
-        reasons.append(
-            "❌ Mezuniyet şartı kesin olarak eşleşmedi."
-        )
-
-    # --------------------------------------------------------
-    # KPSS
-    # --------------------------------------------------------
-
-    required_kpss = extract_kpss(text)
-
-    if required_kpss is None:
-
-        score += 10
-
-        reasons.append(
-            "🟡 KPSS taban puanı tespit edilemedi."
-        )
-
-    else:
-
-        if profile["kpss_p3"] >= required_kpss:
-
-            score += 25
-
-            reasons.append(
-                f"✅ KPSS uygun: "
-                f"{profile['kpss_p3']} ≥ {required_kpss}"
-            )
-
-        else:
-
-            reasons.append(
-                f"❌ KPSS yetersiz: "
-                f"{profile['kpss_p3']} < {required_kpss}"
-            )
-
-    # --------------------------------------------------------
-    # ŞEHİR
-    # --------------------------------------------------------
-
-    city = job["city"]
-
-    if city in profile["cities"]:
-
-        score += 15
-
-        reasons.append(
-            f"✅ Şehir uygun: {city}"
-        )
-
-    elif city == "Belirtilmemiş":
-
-        score += 5
-
-        reasons.append(
-            "🟡 Şehir bilgisi tespit edilemedi."
-        )
-
-    else:
-
-        reasons.append(
-            f"⚪ Şehir tercih dışında: {city}"
-        )
-
-    # --------------------------------------------------------
-    # POZİSYON
-    # --------------------------------------------------------
-
-    position = job["position"]
-
-    if any(
-        p.lower() in position.lower()
-        for p in profile["positions"]
-    ):
-
-        score += 15
-
-        reasons.append(
-            f"✅ Kadro uygun: {position}"
-        )
-
-    # --------------------------------------------------------
-    # SERTİFİKA
-    # --------------------------------------------------------
-
-    certificates = check_certificate(
-        text,
-        profile["certificates"]
-    )
-
-    if certificates:
-
-        score += 10
-
-        reasons.append(
-            "✅ Sertifika eşleşmesi: "
-            + ", ".join(certificates)
-        )
-
-    # --------------------------------------------------------
-    # SONUÇ
-    # --------------------------------------------------------
-
-    if score >= 75:
-
-        status = "🟢 UYGUN"
-
-    elif score >= 50:
-
-        status = "🟡 KONTROL GEREKLİ"
-
-    else:
-
-        status = "🔴 DÜŞÜK UYGUNLUK"
-
-    return {
-        "score": score,
-        "status": status,
-        "reasons": reasons
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Günlük Uygun İlanlar Paneli</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #1e293b;
+      --border: #e2e8f0;
     }
 
-
-# ============================================================
-# GENEL WEB SAYFASI İLAN TARAYICI
-# ============================================================
-
-def scrape_generic_source(source_name, url):
-
-    html = get_page(url)
-
-    if not html:
-        return []
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-    jobs = []
-
-    links = soup.find_all("a")
-
-    for link in links:
-
-        title = clean_text(
-            link.get_text(" ", strip=True)
-        )
-
-        href = link.get("href")
-
-        if not title or not href:
-            continue
-
-        title_lower = title.lower()
-
-        keywords = [
-            "personel",
-            "memur",
-            "büro",
-            "işe alım",
-            "alım ilanı",
-            "kpss",
-            "sözleşmeli",
-            "işçi",
-            "ilan"
-        ]
-
-        if not any(
-            keyword in title_lower
-            for keyword in keywords
-        ):
-            continue
-
-        full_url = urljoin(
-            url,
-            href
-        )
-
-        job_text = title
-
-        jobs.append({
-            "source": source_name,
-            "title": title,
-            "url": full_url,
-            "text": job_text,
-            "city": detect_city(job_text),
-            "position": detect_position(job_text),
-            "hash": create_hash(full_url)
-        })
-
-    return jobs
-
-
-# ============================================================
-# TÜM KAYNAKLARI TARA
-# ============================================================
-
-def scan_all_sources():
-
-    all_jobs = []
-
-    progress = st.progress(0)
-
-    total = len(SOURCES)
-
-    for index, (name, url) in enumerate(
-        SOURCES.items()
-    ):
-
-        st.write(
-            f"🔎 Taranıyor: **{name}**"
-        )
-
-        jobs = scrape_generic_source(
-            name,
-            url
-        )
-
-        all_jobs.extend(jobs)
-
-        progress.progress(
-            int(
-                ((index + 1) / total) * 100
-            )
-        )
-
-        time.sleep(0.5)
-
-    # --------------------------------------------------------
-    # DUPLICATE TEMİZLEME
-    # --------------------------------------------------------
-
-    unique_jobs = {}
-
-    for job in all_jobs:
-
-        unique_jobs[job["hash"]] = job
-
-    return list(
-        unique_jobs.values()
-    )
-
-
-# ============================================================
-# ARAYÜZ
-# ============================================================
-
-st.title(
-    "🔎 Kamu İlan Takip Botu"
-)
-
-st.caption(
-    "Resmî kamu kaynaklarındaki personel ilanlarını "
-    "tarama ve kişisel kriterlere göre analiz etme sistemi."
-)
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-st.sidebar.header(
-    "👤 Profiliniz"
-)
-
-kpss = st.sidebar.number_input(
-    "KPSS P3",
-    min_value=0,
-    max_value=100,
-    value=DEFAULT_PROFILE["kpss_p3"]
-)
-
-cities = st.sidebar.multiselect(
-    "Tercih edilen şehirler",
-    [
-        "Ankara",
-        "Konya",
-        "İstanbul",
-        "İzmir",
-        "Bursa",
-        "Antalya",
-        "Eskişehir",
-        "Kayseri",
-        "Adana",
-        "Mersin"
-    ],
-    default=DEFAULT_PROFILE["cities"]
-)
-
-department = st.sidebar.text_input(
-    "Mezuniyet",
-    DEFAULT_PROFILE["department"]
-)
-
-st.sidebar.write(
-    "### Sertifikalar"
-)
-
-computer_certificate = st.sidebar.checkbox(
-    "Bilgisayar",
-    value=True
-)
-
-accounting_certificate = st.sidebar.checkbox(
-    "Bilgisayarlı Muhasebe",
-    value=True
-)
-
-certificates = []
-
-if computer_certificate:
-    certificates.append("Bilgisayar")
-
-if accounting_certificate:
-    certificates.append(
-        "Bilgisayarlı Muhasebe"
-    )
-
-# ============================================================
-# PROFİL OLUŞTUR
-# ============================================================
-
-profile = {
-    "department": department,
-    "degree": "Lisans",
-    "kpss_p3": kpss,
-    "cities": cities,
-    "positions": DEFAULT_PROFILE["positions"],
-    "certificates": certificates,
-    "high_school": DEFAULT_PROFILE["high_school"]
-}
-
-# ============================================================
-# ARA BUTONU
-# ============================================================
-
-if st.button(
-    "🔎 İLANLARI ARA",
-    type="primary",
-    use_container_width=True
-):
-
-    with st.spinner(
-        "Resmî kaynaklar taranıyor..."
-    ):
-
-        jobs = scan_all_sources()
-
-    st.session_state["jobs"] = jobs
-
-    st.success(
-        f"{len(jobs)} ilan tespit edildi."
-    )
-
-# ============================================================
-# SONUÇLAR
-# ============================================================
-
-if "jobs" in st.session_state:
-
-    jobs = st.session_state["jobs"]
-
-    st.header(
-        "📋 Sonuçlar"
-    )
-
-    if not jobs:
-
-        st.warning(
-            "Uygun ilan bulunamadı veya kaynaklara erişilemedi."
-        )
-
-    else:
-
-        analyzed_jobs = []
-
-        for job in jobs:
-
-            analysis = analyze_job(
-                job,
-                profile
-            )
-
-            job["analysis"] = analysis
-
-            analyzed_jobs.append(job)
-
-        # En yüksek uygunluk önce
-        analyzed_jobs.sort(
-            key=lambda x: x["analysis"]["score"],
-            reverse=True
-        )
-
-        # ----------------------------------------------------
-        # FİLTRELER
-        # ----------------------------------------------------
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-
-            min_score = st.slider(
-                "Minimum uygunluk",
-                0,
-                100,
-                0
-            )
-
-        with col2:
-
-            selected_status = st.multiselect(
-                "Durum",
-                [
-                    "🟢 UYGUN",
-                    "🟡 KONTROL GEREKLİ",
-                    "🔴 DÜŞÜK UYGUNLUK"
-                ],
-                default=[
-                    "🟢 UYGUN",
-                    "🟡 KONTROL GEREKLİ"
-                ]
-            )
-
-        with col3:
-
-            search = st.text_input(
-                "İlan ara"
-            ).lower()
-
-        # ----------------------------------------------------
-        # SONUÇLARI FİLTRELE
-        # ----------------------------------------------------
-
-        filtered = []
-
-        for job in analyzed_jobs:
-
-            analysis = job["analysis"]
-
-            if analysis["score"] < min_score:
-                continue
-
-            if (
-                selected_status
-                and analysis["status"]
-                not in selected_status
-            ):
-                continue
-
-            if search:
-
-                searchable = (
-                    job["title"]
-                    + " "
-                    + job["text"]
-                    + " "
-                    + job["source"]
-                ).lower()
-
-                if search not in searchable:
-                    continue
-
-            filtered.append(job)
-
-        st.write(
-            f"**{len(filtered)} ilan gösteriliyor.**"
-        )
-
-        # ----------------------------------------------------
-        # İLAN KARTLARI
-        # ----------------------------------------------------
-
-        for job in filtered:
-
-            analysis = job["analysis"]
-
-            with st.container():
-
-                st.subheader(
-                    job["title"]
-                )
-
-                c1, c2, c3, c4 = st.columns(4)
-
-                c1.metric(
-                    "Uygunluk",
-                    f"{analysis['score']}/100"
-                )
-
-                c2.write(
-                    f"**Durum**\n\n"
-                    f"{analysis['status']}"
-                )
-
-                c3.write(
-                    f"**Şehir**\n\n"
-                    f"{job['city']}"
-                )
-
-                c4.write(
-                    f"**Kadro**\n\n"
-                    f"{job['position']}"
-                )
-
-                st.write(
-                    f"**Kaynak:** {job['source']}"
-                )
-
-                st.write(
-                    "**Analiz:**"
-                )
-
-                for reason in analysis["reasons"]:
-
-                    st.write(
-                        reason
-                    )
-
-                st.link_button(
-                    "📄 İlanı Aç",
-                    job["url"]
-                )
-
-                st.divider()
-
-# ============================================================
-# BİLGİ
-# ============================================================
-
-st.sidebar.divider()
-
-st.sidebar.info(
-    "Bu sistem ilanları bulup şartlarını analiz etmek "
-    "için tasarlanmıştır. Başvuru işlemini kullanıcı "
-    "resmî kurumun kendi sayfasından gerçekleştirmelidir."
-)
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--primary);
+      font-size: 24px;
+    }
+
+    .date-badge {
+      background-color: #dbeafe;
+      color: var(--primary);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .search-box {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 15px;
+      box-sizing: border-box;
+    }
+
+    .job-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+
+    .job-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .job-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    .job-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 8px 0;
+      color: #0f172a;
+    }
+
+    .company {
+      color: #64748b;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+
+    .match-score {
+      display: inline-block;
+      background-color: #dcfce7;
+      color: #15803d;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .apply-btn {
+      display: block;
+      width: 100%;
+      text-align: center;
+      background-color: var(--primary);
+      color: white;
+      text-decoration: none;
+      padding: 10px 0;
+      border-radius: 6px;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+
+    .apply-btn:hover {
+      background-color: #1d4ed8;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>📌 Günlük İlan Takip Paneli</h1>
+      <span class="date-badge" id="currentDate"></span>
+    </header>
+
+    <input type="text" id="searchInput" class="search-box" placeholder="İlan başlığı, şirket veya anahtar kelime ara..." onkeyup="filterJobs()">
+
+    <div class="job-grid" id="jobGrid">
+      <!-- İlanlar buraya dinamik eklenecek -->
+    </div>
+  </div>
+
+  <script>
+    // Tarihi güncelle
+    document.getElementById('currentDate').innerText = new Date().toLocaleDateString('tr-TR', {
+      day: 'numeric', month: 'long', year: 'numeric'
+    });
+
+    // Örnek ilan verileri (Buraya API veya Google Sheet üzerinden gelen veriler basılacak)
+    const jobs = [
+      {
+        title: "Kıdemli Yazılım Geliştirici",
+        company: "Teknoloji A.Ş.",
+        location: "İstanbul (Hibrit)",
+        match: "%95 Uygun",
+        link: "#"
+      },
+      {
+        title: "Frontend Developer (React)",
+        company: "Dijital Ajans",
+        location: "Uzaktan (Remote)",
+        match: "%88 Uygun",
+        link: "#"
+      },
+      {
+        title: "Veri Analisti",
+        company: "Finans Grubu",
+        location: "Ankara",
+        match: "%82 Uygun",
+        link: "#"
+      }
+    ];
+
+    function renderJobs(data) {
+      const grid = document.getElementById('jobGrid');
+      grid.innerHTML = '';
+      
+      if(data.length === 0) {
+        grid.innerHTML = '<p style="color:#64748b;">Aramanıza uygun ilan bulunamadı.</p>';
+        return;
+      }
+
+      data.forEach(job => {
+        const card = document.createElement('div');
+        card.className = 'job-card';
+        card.innerHTML = `
+          <div class="match-score">🎯 ${job.match}</div>
+          <h2 class="job-title">${job.title}</h2>
+          <div class="company">🏢 ${job.company} • 📍 ${job.location}</div>
+          <a href="${job.link}" target="_blank" class="apply-btn">İlanı İncele</a>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function filterJobs() {
+      const query = document.getElementById('searchInput').value.toLowerCase();
+      const filtered = jobs.filter(j => 
+        j.title.toLowerCase().includes(query) || 
+        j.company.toLowerCase().includes(query)
+      );
+      renderJobs(filtered);
+    }
+
+    // İlk yüklemede çalıştır
+    renderJobs(jobs);
+  </script>
+</body>
+</html>
